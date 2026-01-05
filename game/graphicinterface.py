@@ -3,7 +3,7 @@ import numpy as np
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                              QPushButton, QLabel, QMessageBox)
 from PyQt6.QtGui import QPainter, QColor, QBrush, QFont
-from PyQt6.QtCore import Qt, QRectF, pyqtSignal, QEventLoop
+from PyQt6.QtCore import Qt, QRectF, pyqtSignal, QEventLoop, QTimer
 from typing import Optional
 
 class BoardWidget(QWidget):
@@ -35,8 +35,8 @@ class BoardWidget(QWidget):
         for r in range(rows):
             for c in range(cols):
                 val = self.board[r, c]
-                if val == 1: color = QColor("#e74c3c")   # Rouge
-                elif val == -1: color = QColor("#f1c40f") # Jaune
+                if val == -1: color = QColor("#e74c3c")   # Rouge
+                elif val == 1: color = QColor("#f1c40f") # Jaune
                 else: color = QColor("#ecf0f1")           # Vide
 
                 x = off_x + c * size + (size - radius)/2
@@ -132,15 +132,14 @@ class Interface:
         return self._wait()
 
     def send_game(self, player: int, board: np.ndarray) -> Optional[tuple[int]]:
-        """Affiche le jeu et attend un clic."""
         if not self._running: return None
         self._clean_ui()
 
-        nom = "Joueur 1 (ROUGE)" if player == 1 else "Joueur 2 (JAUNE)"
-        c_txt = "#e74c3c" if player == 1 else "#f1c40f"
+        # On utilise la nouvelle méthode
+        nom, code_couleur = self._get_player_info(player)
 
         lbl = QLabel(f"Au tour de : {nom}")
-        lbl.setStyleSheet(f"color: {c_txt}; font-size: 24px; font-weight: bold;")
+        lbl.setStyleSheet(f"color: {code_couleur}; font-size: 24px; font-weight: bold;")
         lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.layout.addWidget(lbl)
 
@@ -159,29 +158,32 @@ class Interface:
 
         return self._wait()
 
-    def refresh_only(self, player: int, board: np.ndarray) -> None:
-        """Met à jour l'affichage SANS attendre de clic (pour la fin de partie)."""
+    def refresh_only(self, player: int, board: np.ndarray, message: str = None) -> None:
         if not self._running: return
         self._clean_ui()
        
-        nom = "Joueur 1 (ROUGE)" if player == 1 else "Joueur 2 (JAUNE)"
-        c_txt = "#e74c3c" if player == 1 else "#f1c40f"
+        # On utilise la nouvelle méthode
+        nom, code_couleur = self._get_player_info(player)
 
-        lbl = QLabel(f"FIN DE PARTIE") # Texte générique
-        lbl.setStyleSheet(f"color: {c_txt}; font-size: 24px; font-weight: bold;")
+        if message:
+            texte = message
+        else:
+            texte = f"Au tour de : {nom}"
+
+        lbl = QLabel(texte)
+        lbl.setStyleSheet(f"color: {code_couleur}; font-size: 24px; font-weight: bold;")
         lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.layout.addWidget(lbl)
+        # ----------------------
 
         board_widget = BoardWidget(board)
-        # Pas de connexion de signal ici car on n'attend pas de clic
         self.layout.addWidget(board_widget)
 
-        # Force le redessin immédiat
         QApplication.processEvents()
 
     def notify_victory(self, player: int) -> None:
-        # player est le gagnant
-        nom = "ROUGE" if player == 1 else "JAUNE"
+        # player est le gagnant (-1 ou 1)
+        nom = "ROUGE" if player == -1 else "JAUNE" # <-- Correction ici
         QMessageBox.information(self.window, "Victoire !", f"Le joueur {nom} a gagné !")
 
     def notify_message(self, message: str)->None:
@@ -189,3 +191,28 @@ class Interface:
 
     def notify_draw(self) -> None:
         QMessageBox.information(self.window, "Égalité", "Match nul !")
+
+    # Ajoute ceci dans la classe Interface
+    def set_title(self, title: str) -> None:
+        self.window.setWindowTitle(title)
+    
+    def pause(self, milliseconds: int) -> None:
+        """Met le programme en pause sans geler la fenêtre."""
+        if not self._running: return
+        
+        # On crée une petite boucle d'attente locale
+        loop = QEventLoop()
+        # On dit au Timer : "Dans X ms, arrête la boucle"
+        QTimer.singleShot(milliseconds, loop.quit)
+        # On lance la boucle (ça bloque le code ici, mais l'interface reste vivante)
+        loop.exec()
+    
+    # Ajoute ce bloc DANS la classe Interface (attention à l'indentation)
+    def _get_player_info(self, player_code: int):
+        """Retourne le nom et la couleur selon le code joueur (-1 ou 1)."""
+        if player_code == -1: 
+            # C'est le Joueur 1 (ROUGE)
+            return "Joueur 1 (ROUGE)", "#e74c3c"
+        else:                 
+            # C'est le Joueur 2 (JAUNE / IA)
+            return "Joueur 2 (JAUNE)", "#f1c40f"
