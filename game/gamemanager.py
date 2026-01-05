@@ -1,5 +1,6 @@
 import numpy as np
 from abc import ABC, abstractmethod
+from calculateur import AIModel
 
 
 class InvalidMove(Exception):
@@ -10,15 +11,26 @@ class Gestionnaire(ABC):
     """Classe abstraite du jeu."""
     name: str = "Jeu"
 
-    def __init__(self):
+    def __init__(self,mode_solo=False, difficulty=4):
         self._width = 7
         self._height = 6
         self._board = np.zeros((self._height, self._width), dtype=int)
-        self._current_player = 1  # 1 = Rouge, -1 = Jaune
+        self._current_player = -1  # 1 = Rouge, -1 = Jaune
         self._victory = False
         self._draw = False
         self._event = False
         self._message_event = ""
+
+        self.mode_solo = mode_solo
+        self.difficulty = difficulty # Profondeur du Minimax
+        self.ai_engine = None
+        
+        if self.mode_solo:
+            print(f"Initialisation du mode SOLO (Difficulté {difficulty})")
+            try:
+                self.ai_engine = AIModel() # Charge le C++
+            except Exception as e:
+                print(f"Erreur critique : Impossible de charger l'IA C++. {e}")
 
     def check_victory(self, move: tuple[int, int], player: int, n : int) -> bool:
         """Vérifie si le coup joué complète un alignement de n."""
@@ -46,6 +58,24 @@ class Gestionnaire(ABC):
             if count >= n:
                 return True
         return False
+    
+    def get_ai_move(self):
+        """
+        Demande au C++ quelle colonne jouer.
+        Ne joue pas le coup directement, renvoie juste la colonne.
+        """
+        if not self.ai_engine:
+            return None
+        
+        # Le C++ attend le plateau et la profondeur
+        # Attention : Ton C++ considère que l'IA est le joueur 'AI_PIECE' (souvent défini à 1 ou 2).
+        # Il faut s'assurer que le tableau envoyé correspond à ce que le C++ attend.
+        # Si ton C++ attend 1 pour l'IA et -1 pour l'Humain, c'est bon si self.current_player est l'IA.
+        
+        print("🤖 L'IA réfléchit...")
+        col = self.ai_engine.get_best_move(self.grid, depth=self.difficulty)
+        print(f"🤖 L'IA a choisi la colonne {col}")
+        return col
 
     @abstractmethod
     def play(self, move: tuple[int, int]) -> None:
@@ -79,6 +109,10 @@ class Gestionnaire(ABC):
 class ClassicGame(Gestionnaire):
     """Variante classique du puissance 4."""
     name = "Puissance 4 Classique"
+
+    def __init__(self, mode_solo=False, difficulty=4):
+        # On passe les paramètre au parent pour qu'il charge l'IA
+        super().__init__(mode_solo=mode_solo, difficulty=difficulty)
     
     def play(self, move: tuple[int, int]) -> None:
         _, col = move
@@ -108,11 +142,35 @@ class ClassicGame(Gestionnaire):
         # 5. Sinon, tour suivant
         else:
             self._current_player *= -1
+    
+    def play_ai_turn(self):
+        """
+        1. Demande au C++ la meilleure colonne.
+        2. Construit le move.
+        3. Appelle play().
+        """
+        if not self.mode_solo or not self.ai_engine:
+            return
+
+        # On vérifie que c'est bien à l'IA de jouer (Joueur -1)
+        if self._current_player != 1:
+            return
+
+        
+        # APPEL AU C++ (C'est ici que la magie opère)
+        # On envoie la grille numpy et la profondeur
+        best_col = self.ai_engine.get_best_move(self.board, depth=self.difficulty)
+        
+
+        # On exécute le coup comme si c'était un humain
+        # On passe (0, best_col) car ta méthode play attend un tuple, 
+        # même si le 0 ne sert à rien grâce à la gravité.
+        self.play((0, best_col))
 
     
 
 class Variante_1(Gestionnaire):
-    name = "Variante 1"
+    name = "1 pour 3"
     def __init__(self):
         super().__init__()
         self._message_event = "Vous pouvez retirer un pion de votre adversaire"
