@@ -1,6 +1,6 @@
 import numpy as np
 from abc import ABC, abstractmethod
-from calculateur import AIModel
+from game.calculateur import AIModel
 
 
 class InvalidMove(Exception):
@@ -8,10 +8,10 @@ class InvalidMove(Exception):
     pass
 
 class Gestionnaire(ABC):
-    """Classe abstraite du jeu."""
+    """Classe abstraite du jeu gérant l'état du plateau et les règles communes."""
     name: str = "Jeu"
 
-    def __init__(self,mode_solo=False, difficulty=4):
+    def __init__(self, mode_solo=False, difficulty=4):
         self._width = 7
         self._height = 6
         self._board = np.zeros((self._height, self._width), dtype=int)
@@ -22,24 +22,24 @@ class Gestionnaire(ABC):
         self._message_event = ""
 
         self.mode_solo = mode_solo
-        self.difficulty = difficulty # Profondeur du Minimax
+        self.difficulty = difficulty # Profondeur de recherche du Minimax
         self.ai_engine = None
         
         if self.mode_solo:
             print(f"Initialisation du mode SOLO (Difficulté {difficulty})")
             try:
-                self.ai_engine = AIModel() # Charge le C++
+                self.ai_engine = AIModel() # Chargement de la librairie C++
             except Exception as e:
                 print(f"Erreur critique : Impossible de charger l'IA C++. {e}")
 
     def check_victory(self, move: tuple[int, int], player: int, n : int) -> bool:
-        """Vérifie si le coup joué complète un alignement de n."""
+        """Vérifie si le coup joué complète un alignement de taille n."""
         r, c = move
-        # Directions : Horizontal, Vertical, Diag \, Diag /
+        # Directions : Horizontal, Vertical, Diagonale \, Diagonale /
         directions = [(0, 1), (1, 0), (1, 1), (1, -1)]
 
         for dr, dc in directions:
-            count = 1 # Le pion qu'on vient de poser
+            count = 1 # On compte le pion que l'on vient de poser
 
             # Sens positif
             for i in range(1, n):
@@ -61,20 +61,15 @@ class Gestionnaire(ABC):
     
     def get_ai_move(self):
         """
-        Demande au C++ quelle colonne jouer.
-        Ne joue pas le coup directement, renvoie juste la colonne.
+        Demande au moteur C++ la meilleure colonne à jouer.
+        Ne joue pas le coup directement, renvoie uniquement l'index de la colonne.
         """
         if not self.ai_engine:
             return None
         
-        # Le C++ attend le plateau et la profondeur
-        # Attention : Ton C++ considère que l'IA est le joueur 'AI_PIECE' (souvent défini à 1 ou 2).
-        # Il faut s'assurer que le tableau envoyé correspond à ce que le C++ attend.
-        # Si ton C++ attend 1 pour l'IA et -1 pour l'Humain, c'est bon si self.current_player est l'IA.
-        
-        print("🤖 L'IA réfléchit...")
-        col = self.ai_engine.get_best_move(self.grid, depth=self.difficulty)
-        print(f"🤖 L'IA a choisi la colonne {col}")
+        print("L'IA réfléchit...")
+        col = self.ai_engine.get_best_move(self.board, depth=self.difficulty)
+        print(f"L'IA a choisi la colonne {col}")
         return col
 
     @abstractmethod
@@ -107,21 +102,20 @@ class Gestionnaire(ABC):
 
 
 class ClassicGame(Gestionnaire):
-    """Variante classique du puissance 4."""
+    """Implémentation des règles du Puissance 4 classique."""
     name = "Puissance 4 Classique"
 
     def __init__(self, mode_solo=False, difficulty=4):
-        # On passe les paramètre au parent pour qu'il charge l'IA
         super().__init__(mode_solo=mode_solo, difficulty=difficulty)
     
     def play(self, move: tuple[int, int]) -> None:
         _, col = move
 
-        # 1. Validation
+        # 1. Validation du coup
         if col < 0 or col >= self.width or self.board[0, col] != 0:
             raise InvalidMove("Colonne pleine ou invalide.")
 
-        # 2. Gravité : Trouver la ligne
+        # 2. Application de la gravité
         r_found = -1
         for r in range(self.height - 1, -1, -1):
             if self.board[r, col] == 0:
@@ -129,66 +123,97 @@ class ClassicGame(Gestionnaire):
                 r_found = r
                 break
 
-        # 3. Vérification Victoire
-        # Si le joueur actuel gagne, on active le flag et ON NE CHANGE PAS de joueur.
-        # Ainsi, self.current_player désignera le gagnant.
+        # 3. Vérification de la victoire
         if self.check_victory((r_found, col), self._current_player, 4):
             self._victory = True
 
-        # 4. Vérification Égalité
+        # 4. Vérification de l'égalité (grille pleine)
         elif np.all(self.board != 0):
             self._draw = True
 
-        # 5. Sinon, tour suivant
+        # 5. Changement de tour
         else:
             self._current_player *= -1
     
     def play_ai_turn(self):
         """
-        1. Demande au C++ la meilleure colonne.
-        2. Construit le move.
-        3. Appelle play().
+        Gère le tour de l'IA : calcul du meilleur coup et exécution.
         """
         if not self.mode_solo or not self.ai_engine:
             return
 
-        # On vérifie que c'est bien à l'IA de jouer (Joueur -1)
+        # On vérifie que c'est bien au tour de l'IA (Joueur 1)
         if self._current_player != 1:
             return
 
+        # Appel au moteur C++
+        # Conversion du plateau en tableau 1D d'entiers 32 bits
+        board_c = self.board.flatten().astype(np.int32)
         
-        # APPEL AU C++ (C'est ici que la magie opère)
-        # On envoie la grille numpy et la profondeur
-        best_col = self.ai_engine.get_best_move(self.board, depth=self.difficulty)
+        # Mode 0 correspond au jeu classique
+        best_col = self.ai_engine.get_best_move(board_c, depth=self.difficulty, mode=0)
         
-
-        # On exécute le coup comme si c'était un humain
-        # On passe (0, best_col) car ta méthode play attend un tuple, 
-        # même si le 0 ne sert à rien grâce à la gravité.
+        # On exécute le coup
         self.play((0, best_col))
 
     
 
 class Variante_1(Gestionnaire):
+    """Variante '1 pour 3' : Aligner 3 pions permet de supprimer un pion adverse."""
     name = "1 pour 3"
-    def __init__(self):
-        super().__init__()
+
+    def __init__(self, mode_solo=False, difficulty=4):
+        super().__init__(mode_solo=mode_solo, difficulty=difficulty)
         self._message_event = "Vous pouvez retirer un pion de votre adversaire"
         self._event = False
 
- 
+    def get_best_victim(self, opponent_player):
+        """Détermine le meilleur pion adverse à supprimer (stratégie IA)."""
+        # Priorité : Centre du plateau, du bas vers le haut
+        priority_cols = [3, 2, 4, 1, 5, 0, 6]
+        for col in priority_cols:
+            for row in range(self.height - 1, -1, -1):
+                if self.board[row, col] == opponent_player:
+                    return (row, col)
+        return None
+
+    def play_ai_turn(self):
+        """Logique spécifique de l'IA pour la variante (pose et suppression)."""
+        if not self.mode_solo or not self.ai_engine or self._current_player != 1:
+            return
+
+        # 1. Calcul du meilleur coup (Mode 1 = Variante)
+        board_c = self.board.flatten().astype(np.int32)
+        best_col = self.ai_engine.get_best_move(board_c, depth=self.difficulty, mode=1)
+
+        # 2. L'IA joue le coup (Phase de pose)
+        try:
+            self.play((0, best_col))
+        except InvalidMove:
+            return
+
+        # 3. Gestion de l'événement (Si l'IA a aligné 3 pions)
+        if self._event:
+            target = self.get_best_victim(-1) # Cible l'humain (-1)
+            
+            if target:
+                print(f"L'IA supprime le pion en {target}")
+                self.play(target) # Déclenche la phase de suppression
+            else:
+                self._event = False
+                self._current_player *= -1
 
     def play(self, move: tuple[int, int]) -> None:
-
-        ### COUP CLASSIQUE ###
+        """Gestion du tour : soit pose de pion, soit suppression selon l'état de l'événement."""
+        
+        #  CAS 1 : TOUR NORMAL (POSER UN PION) 
         if not self._event:
             _, col = move
 
-            # 1. Validation
             if col < 0 or col >= self.width or self.board[0, col] != 0:
                 raise InvalidMove("Colonne pleine ou invalide.")
 
-            # 2. Gravité : Trouver la ligne
+            # Application de la gravité
             r_found = -1
             for r in range(self.height - 1, -1, -1):
                 if self.board[r, col] == 0:
@@ -196,48 +221,45 @@ class Variante_1(Gestionnaire):
                     r_found = r
                     break
             
-            # --- CORRECTION DE L'ORDRE DES VÉRIFICATIONS ---
+            #  PRIORITÉS DES RÈGLES 
 
-            # 3. PRIORITÉ ABSOLUE : Vérification Victoire (4 alignés)
-            # On vérifie D'ABORD si on a gagné.
+            # 1. Victoire (4 alignés) -> Fin de partie
             if self.check_victory((r_found, col), self._current_player, 4):
                 self._victory = True
-                # La partie est finie, on ne change pas de joueur, on ne déclenche pas l'event.
 
-            # 4. PRIORITÉ SECONDAIRE : Vérification Événement (3 alignés)
-            # Si on n'a pas gagné, on regarde si on en a aligné 3.
+            # 2. Événement (3 alignés) -> Action bonus (Suppression)
             elif self.check_victory((r_found, col), self._current_player, 3):
                 self._event = True 
-                # On reste sur le même joueur pour qu'il puisse effectuer son action bonus.
+                # On ne change pas de joueur pour permettre l'action de suppression
 
-            # 5. Vérification Égalité
+            # 3. Égalité
             elif np.all(self.board != 0):
                 self._draw = True
 
-            # 6. Sinon, c'est un tour normal qui se termine
+            # 4. Tour suivant standard
             else:
                 self._current_player *= -1
         
-        ### EVENEMENT ###
+        #  CAS 2 : ÉVÉNEMENT (SUPPRIMER UN PION) 
         else:
             row, col = move
-            other_player = self.current_player * -1
-
-            # 1. Validation
+            # Détermination de la cible (Si je suis 1, je vise -1)
+            other_player = -1 if self.current_player == 1 else 1
+            
             if (row < 0 or row >= self.height or 
                 col < 0 or col >= self.width or 
                 self.board[row, col] != other_player):
                 raise InvalidMove("Vous devez cliquer sur un pion adverse !")
 
-            # 2. Retrait du pion
+            # Suppression du pion
             self._board[row, col] = 0
 
-            # 3. Gravité
+            # Gravité après suppression (Chute des pions du dessus)
             for r in range(row, 0, -1):
                 self._board[r, col] = self._board[r-1, col]
             self._board[0, col] = 0
 
-            # 4. Vérification Victoire
+            # Vérification des conditions de victoire après la chute
             victoire_moi = False
             victoire_autre = False
 
@@ -251,42 +273,19 @@ class Variante_1(Gestionnaire):
                         else:
                             victoire_autre = True
 
-            # 5. Gestion du résultat et du Changement de joueur
-            
+            # Résolution des conflits de victoire post-gravité
             if victoire_moi and victoire_autre:
                 self._draw = True
-                # En cas d'égalité, peu importe qui est current_player
-            
             elif victoire_moi:
                 self._victory = True
-                # IMPORTANT : On NE change PAS de joueur.
-                # self.current_player est celui qui a joué, donc le gagnant.
-            
             elif victoire_autre:
-                self._victory = True
-                # IMPORTANT : L'adversaire a gagné (contre son camp ou chute).
-                # On force current_player sur l'adversaire pour l'affichage.
-                self._current_player = other_player
-
+                self._victory = True 
+                self._current_player = other_player # L'adversaire gagne suite à notre action
             else:
-                # CAS NORMAL : Personne n'a gagné.
-                # C'est SEULEMENT ICI qu'on passe la main à l'adversaire.
                 self._current_player *= -1
 
-            # On désactive l'événement quoi qu'il arrive
-            self._event = False 
+            self._event = False
 
 
-        
-
-
-
-
-# Liste des variantes disponibles (export)
+# Liste des variantes disponibles
 variantes = [ClassicGame, Variante_1]
-
-
-
-
-
-
