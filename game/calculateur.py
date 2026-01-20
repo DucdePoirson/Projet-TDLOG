@@ -1,50 +1,43 @@
 import ctypes
 import numpy as np
 import os
-import sys
+import platform
 
 class AIModel:
+    """Interface Python pour la librairie C++ de l'IA."""
     def __init__(self):
-        # 1. Trouver le chemin du fichier compilé (.dylib sur Mac, .so sur Linux, .dll sur Windows)
-        # On suppose que le fichier est dans ai_engine/build/
-        # Ajuste le chemin si besoin !
-        
+        # Détection de l'extension selon l'OS
+        if platform.system() == "Darwin":
+            lib_name = "libai_lib.dylib"
+        elif platform.system() == "Windows":
+            lib_name = "ai_lib.dll"
+        else:
+            lib_name = "libai_lib.so"
+
         current_dir = os.path.dirname(os.path.abspath(__file__))
-        lib_path = os.path.join(current_dir, "ai_engine/build/libai_lib.dylib") 
+        project_root = os.path.dirname(current_dir)
         
-        if not os.path.exists(lib_path):
-             lib_path = os.path.join(current_dir, "ai_engine/build/Debug/libai_lib.dylib")
+        # Recherche du binaire compilé
+        lib_path = os.path.join(project_root, "ai_engine", "build", lib_name)
 
         if not os.path.exists(lib_path):
-            raise FileNotFoundError(f"Impossible de trouver le moteur IA à : {lib_path}. As-tu bien compilé avec CMake ?")
+            lib_path_debug = os.path.join(project_root, "ai_engine", "build", "Debug", lib_name)
+            if os.path.exists(lib_path_debug):
+                lib_path = lib_path_debug
+            else:
+                raise FileNotFoundError("Librairie IA introuvable. Veuillez compiler le moteur C++.")
 
-        print(f" Moteur IA chargé depuis : {lib_path}")
-
-        # 2. Charger la librairie
         self.lib = ctypes.CDLL(lib_path)
 
-        # 3. Définir la signature de la fonction C++
-        # int get_best_move(int* board, int depth)
-        
-        # Argument 1 : Un pointeur vers un tableau d'entiers (le board)
+        # Définition de la signature de la fonction C++
         self.lib.get_best_move.argtypes = [
             np.ctypeslib.ndpointer(dtype=np.int32, ndim=1, flags='C_CONTIGUOUS'),
-            ctypes.c_int # depth
+            ctypes.c_int, # Profondeur
+            ctypes.c_int  # Mode de jeu
         ]
-        
-        # Type de retour : int (la colonne)
         self.lib.get_best_move.restype = ctypes.c_int
 
-    def get_best_move(self, board_numpy, depth=4):
-        """
-        board_numpy: Un tableau numpy 6x7 (ou plat de 42).
-                     IMPORTANT : Doit contenir des int32.
-                     Convention : 0=Vide, 1=IA, -1=Adversaire (selon tes constantes C++)
-        """
-        # S'assurer que le tableau est plat (1D) et en int32 (C++ n'aime pas le int64 par défaut de python)
-        board_flat = board_numpy.flatten().astype(np.int32)
-        
-        # Appel de la fonction C++
-        col = self.lib.get_best_move(board_flat, depth)
-        
-        return col
+    def get_best_move(self, board, depth=4, mode=0):
+        """Appelle la fonction Minimax du moteur C++."""
+        board_flat = board.flatten().astype(np.int32)
+        return self.lib.get_best_move(board_flat, depth, mode)
