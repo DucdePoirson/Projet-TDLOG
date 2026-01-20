@@ -1,8 +1,9 @@
-from gamemanager import variantes, InvalidMove
-from graphicinterface import Interface
+from game.gamemanager import variantes, InvalidMove
+from game.graphicinterface import Interface
 
 
 class Controller:
+    """Contrôleur principal gérant la boucle de jeu et les interactions utilisateur."""
     def __init__(self):
         self._interface = Interface()
         self._variantes = variantes
@@ -11,6 +12,7 @@ class Controller:
         self._in_game = False
 
     def start(self):
+        """Lance l'application."""
         while self._interface._running:
             if self._in_menu:
                 self.menu_principal()
@@ -18,16 +20,16 @@ class Controller:
                 self.game_loop()
 
     def menu_principal(self):
-        # --- ETAPE 1 : Choix de la Variante ---
+        #  ETAPE 1 : Choix de la Variante 
         choix_variante = self._interface.send_menu(
             "Bienvenue sur Puissance 4",
             [v.name for v in self._variantes]
         )
 
         if choix_variante is None: 
-            return # Fenêtre fermée
+            return # Fermeture de la fenêtre
 
-        # --- ETAPE 2 : Choix du Nombre de Joueurs ---
+        #  ETAPE 2 : Choix du Mode 
         choix_mode = self._interface.send_menu(
             "Choisissez le mode de jeu",
             ["1 Joueur (Contre l'IA)", "2 Joueurs (Local)"]
@@ -36,11 +38,10 @@ class Controller:
         if choix_mode is None: 
             return
 
-        # Si choix_mode vaut 0, c'est "1 Joueur". Sinon c'est False.
         mode_solo = (choix_mode == 0)
-        difficulty = 4 # Valeur par défaut
+        difficulty = 4
 
-        # --- ETAPE 3 : Difficulté (Seulement si mode solo) ---
+        #  ETAPE 3 : Difficulté (Mode solo uniquement) 
         if mode_solo:
             choix_diff = self._interface.send_menu(
                 "Niveau de difficulté",
@@ -48,13 +49,11 @@ class Controller:
             )
             if choix_diff is None: return
             
-            # Mapping : Index -> Profondeur
-            # Facile=2 (rapide, bête), Moyen=4, Difficile=6 (fort)
+            # Mapping : Index -> Profondeur de recherche
             niveaux = [2, 4, 6]
             difficulty = niveaux[choix_diff]
 
-        # --- INITIALISATION ---
-        # On crée le jeu avec TOUS les paramètres
+        #  INITIALISATION 
         self._gestionnaire = self._variantes[choix_variante](
             mode_solo=mode_solo, 
             difficulty=difficulty
@@ -64,50 +63,46 @@ class Controller:
         self._in_game = True
 
     def game_loop(self):
-        # 1. L'Humain joue
+        """Boucle principale d'une partie."""
+        # Récupération de l'action humaine via l'interface
         move = self._interface.send_game(
             self._gestionnaire.current_player,
             self._gestionnaire.board
         )
 
-        if move is None:  # Retour Menu
+        if move is None:  # Retour au Menu
             self._in_game = False
             self._in_menu = True
             self._gestionnaire = None
             return
 
         try:
-            # --- TOUR HUMAIN ---
+            #  TOUR HUMAIN 
             self._gestionnaire.play(move)
 
-            # Vérification fin de partie après coup humain
             if self.check_game_end():
                 return 
 
-            # --- TOUR IA (Seulement si activé) ---
-            # On vérifie si mode_solo est True
+            #  TOUR IA 
             if getattr(self._gestionnaire, 'mode_solo', False):
                 
-                # A. On met à jour l'écran pour voir le pion de l'humain
+                # Mise à jour visuelle avant le coup de l'IA
                 self._interface.refresh_only(self._gestionnaire.current_player, self._gestionnaire.board)
                 
-                # B. LE DÉLAI (Pause de 0.7 seconde pour le réalisme)
+                # Pause pour la fluidité de l'animation
                 self._interface.pause(700) 
                 
-                # C. L'IA réfléchit et joue
+                # Calcul et exécution du coup de l'IA
                 self._gestionnaire.play_ai_turn()
 
-                # Vérification fin de partie après coup IA
                 if self.check_game_end():
                     return
 
         except InvalidMove:
-            pass  # On recommence la boucle
+            pass  # Le coup est invalide, on attend une nouvelle entrée
 
-    # --- NOUVELLE MÉTHODE UTILITAIRE ---
-    # (Pour ne pas copier-coller le bloc de vérification deux fois)
     def check_game_end(self):
-        """Regarde si le jeu est fini (Victoire, Egalité, Event). Retourne True si fini."""
+        """Vérifie les conditions de fin de partie (Victoire, Égalité) ou les événements."""
         
         if self._gestionnaire.victory:
             self._interface.refresh_only(self._gestionnaire.current_player, self._gestionnaire.board)
@@ -123,13 +118,10 @@ class Controller:
             self._in_menu = True
             return True
 
-        # Gestion des variantes (Event)
+        # Gestion des messages liés aux événements de variante
         elif getattr(self._gestionnaire, 'event', False):
             self._interface.notify_message(self._gestionnaire.message_event)
             self._interface.refresh_only(self._gestionnaire.current_player, self._gestionnaire.board)
-            # Pas forcément fin de partie, donc on retourne False sauf si tu veux que l'event stoppe tout
             return False 
 
         return False
-    
-    
