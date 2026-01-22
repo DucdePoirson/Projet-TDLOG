@@ -1,9 +1,10 @@
 import sys
+import os
+
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+
+from game.controller import Controller 
 
 if __name__ == "__main__":
-    try:
-        from controller import Controller
-        app_ctrl = Controller()
-        app_ctrl.start()
-    except KeyboardInterrupt:
-        sys.exit(0)
+    app_ctrl = Controller()
+    app_ctrl.start()
